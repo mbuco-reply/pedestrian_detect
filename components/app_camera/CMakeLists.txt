@@ -1,0 +1,19 @@
+set(include_dirs    include
+                    .)
+
+set(requires    esp_jpeg
+                console
+                driver
+                espressif__esp32-camera
+                esp_timer
+                esp_partition
+                )
+
+set(embed_files     "pedestrian.jpg")
+
+idf_component_register(
+    SRCS "src/app_camera.cpp"
+    INCLUDE_DIRS ${include_dirs}
+    REQUIRES ${requires}
+    EMBED_FILES ${embed_files}
+)
