@@ -1,6 +1,25 @@
 | Supported Targets | ESP32-S3 | ESP32-P4 |
 | ----------------- | -------- | -------- |
 
+# ESP32-S3-EYE Project
+
+## Description
+A project to stream camera images via HTTP server using ESP32-S3-EYE.
+
+## Features
+- Live camera streaming
+- HTTP server for image access
+- Future integration with object detection
+
+## Setup
+Instructions on how to set up and run the project.
+
+## Usage
+How to use the project once it's running.
+
+## License
+[MIT](LICENSE)
+
 
 # Pedestrian Detect Example
 
