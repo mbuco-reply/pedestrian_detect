@@ -5,10 +5,10 @@
 #include "esp_log.h"
 #include "esp_camera.h"
 
-// #include "dl_image.hpp"
-// #include "fb_gfx.h"
+#include "dl_image.hpp"
+#include "fb_gfx.h"
 
-// #include "who_ai_utils.hpp"
+#include "who_ai_utils.hpp"
 
 // #include "pedestrian_detect.hpp"
 
@@ -87,7 +87,7 @@ static void task(AppDetect *self)
         // if (self->queue_i == nullptr)
         //     break;
 
-        if (xQueueReceive(self->queue_i, &frame, 1000/portTICK_PERIOD_MS))
+        if (xQueueReceive(self->queue_i, &frame, 5000/portTICK_PERIOD_MS))
         {
             // ESP_LOGI(TAG, "Got a frame");
             auto &detect_results = self->detect->run((uint8_t *)frame->buf, {480, 640, 3});

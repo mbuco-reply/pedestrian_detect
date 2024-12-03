@@ -9,7 +9,7 @@ set(requires    esp_jpeg
                 esp_partition
                 )
 
-set(embed_files     "pedestrian.jpg")
+set(embed_files     "pedestrian.jpeg")
 
 idf_component_register(
     SRCS "src/app_camera.cpp"
