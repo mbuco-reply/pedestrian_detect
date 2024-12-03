@@ -3,5 +3,5 @@
 idf_component_register(
     SRCS "src/http_server.cpp"
     INCLUDE_DIRS "include"
-    REQUIRES esp_http_server espressif__esp32-camera
+    REQUIRES esp_http_server espressif__esp32-camera esp_driver_jpeg
 )
