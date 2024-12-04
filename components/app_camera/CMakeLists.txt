@@ -1,8 +1,7 @@
 set(include_dirs    include
                     .)
 
-set(requires    esp_jpeg
-                console
+set(requires    console
                 driver
                 espressif__esp32-camera
                 esp_timer

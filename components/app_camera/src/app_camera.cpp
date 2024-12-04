@@ -2,7 +2,6 @@
 
 #include "esp_log.h"
 #include "esp_system.h"
-#include "jpeg_decoder.h"
 
 const static char TAG[] = "App/Camera";
 
@@ -31,45 +30,24 @@ extern const uint8_t pedestrian_jpeg_end[] asm("_binary_pedestrian_jpeg_end");
 //     return &img_frame_pic;
 // }
 
-static camera_fb_t img_frame = {
-    .len = 640 * 480 * 3,
-    .width = 640,
-    .height = 480,
-    .format = PIXFORMAT_RGB888
-};
+// static camera_fb_t img_frame = {
+//     .len = 640 * 480 * 3,
+//     .width = 640,
+//     .height = 480,
+//     .format = PIXFORMAT_RGB888
+// };
 
-uint8_t *get_image(const uint8_t *jpg_img, uint32_t jpg_img_size, int height, int width)
-{
-    uint32_t outbuf_size = height * width * 3;
-    uint8_t *outbuf = (uint8_t *)heap_caps_malloc(outbuf_size, MALLOC_CAP_SPIRAM);
-    // JPEG decode config
-    esp_jpeg_image_cfg_t jpeg_cfg = {.indata = (uint8_t *)jpg_img,
-                                     .indata_size = jpg_img_size,
-                                     .outbuf = outbuf,
-                                     .outbuf_size = outbuf_size,
-                                     .out_format = JPEG_IMAGE_FORMAT_RGB888,
-                                     .out_scale = JPEG_IMAGE_SCALE_0,
-                                     .flags = {
-                                         .swap_color_bytes = 1,
-                                     }};
+// camera_fb_t * get_img()
+// {
+//     img_frame.buf = get_image(pedestrian_jpeg_start, pedestrian_jpeg_end - pedestrian_jpeg_start, 480, 640);
+//     return &img_frame;
+// }
 
-    esp_jpeg_image_output_t outimg;
-    esp_jpeg_decode(&jpeg_cfg, &outimg);
-    assert(outimg.height == height && outimg.width == width);
-    return outbuf;
-}
-
-camera_fb_t * get_img()
-{
-    img_frame.buf = get_image(pedestrian_jpeg_start, pedestrian_jpeg_end - pedestrian_jpeg_start, 480, 640);
-    return &img_frame;
-}
-
-camera_fb_t * get_img_cam(camera_fb_t * frame)
-{
-    img_frame.buf = get_image(frame->buf, frame->len, 480, 640); // Decodes the passed JPEG frame to RGB888 format
-    return &img_frame;
-}
+// camera_fb_t * get_img_cam(camera_fb_t * frame)
+// {
+//     img_frame.buf = get_image(frame->buf, 640*480*3, 480, 640);
+//     return &img_frame;
+// }
 
 AppCamera::AppCamera(const pixformat_t pixel_fromat,
                      const framesize_t frame_size,
@@ -152,10 +130,9 @@ static void task(AppCamera *self)
         if (self->queue_o == nullptr)
             break;
 
-        camera_fb_t *frame_cam = esp_camera_fb_get();
+        camera_fb_t *frame = esp_camera_fb_get();
         // camera_fb_t *frame = get_img();
-        camera_fb_t *frame = get_img_cam(frame_cam);
-        esp_camera_fb_return(frame_cam);
+        // camera_fb_t *frame = get_img_cam(frame_cam);
         
         if (frame) {
             // ESP_LOGI(TAG, "Received frame from camera, passing it to output queue");

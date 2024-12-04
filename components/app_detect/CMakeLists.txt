@@ -5,6 +5,7 @@ set(include_dirs    include
 set(requires    console
                 pedestrian_detect
                 esp_lcd
+                esp_jpeg
                 driver
                 espressif__esp32-camera
                 esp_timer

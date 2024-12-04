@@ -1,16 +1,13 @@
 #include "app_detect.hpp"
 
 #include <list>
-
 #include "esp_log.h"
 #include "esp_camera.h"
 
 #include "dl_image.hpp"
 #include "fb_gfx.h"
-
 #include "who_ai_utils.hpp"
-
-// #include "pedestrian_detect.hpp"
+#include "jpeg_decoder.h"
 
 static const char TAG[] = "App/Detect";
 
@@ -52,6 +49,41 @@ static const char TAG[] = "App/Detect";
 //     return len;
 // }
 
+
+uint8_t *get_image(const uint8_t *jpg_img, uint32_t jpg_img_size, int height, int width)
+{
+    uint32_t outbuf_size = height * width * 3;
+    uint8_t *outbuf = (uint8_t *)heap_caps_malloc(outbuf_size, MALLOC_CAP_SPIRAM);
+    // JPEG decode config
+    esp_jpeg_image_cfg_t jpeg_cfg = {.indata = (uint8_t *)jpg_img,
+                                     .indata_size = jpg_img_size,
+                                     .outbuf = outbuf,
+                                     .outbuf_size = outbuf_size,
+                                     .out_format = JPEG_IMAGE_FORMAT_RGB888,
+                                     .out_scale = JPEG_IMAGE_SCALE_0,
+                                     .flags = {
+                                         .swap_color_bytes = 1,
+                                     }};
+
+    esp_jpeg_image_output_t outimg;
+    esp_jpeg_decode(&jpeg_cfg, &outimg);
+    assert(outimg.height == height && outimg.width == width);
+    return outbuf;
+}
+
+static camera_fb_t img_frame = {
+    .len = 640 * 480 * 3,
+    .width = 640,
+    .height = 480,
+    .format = PIXFORMAT_RGB888
+};
+
+camera_fb_t * get_img_cam(camera_fb_t * frame)
+{
+    img_frame.buf = get_image(frame->buf, 640*480*3, 480, 640);
+    return &img_frame;
+}
+
 void print_detected_result(std::list<dl::detect::result_t> &detect_results)
 {
     for (const auto &res : detect_results) {
@@ -87,8 +119,13 @@ static void task(AppDetect *self)
         if (xQueueReceive(self->queue_i, &frame, portMAX_DELAY) == pdTRUE)
         {
             // ESP_LOGI(TAG, "Got a frame");
-            auto &detect_results = self->detect->run((uint8_t *)frame->buf, {480, 640, 3});
+            uint8_t *img = get_image(frame->buf, frame->len, frame->height, frame->width);
+            esp_camera_fb_return(frame);
+
+            auto &detect_results = self->detect->run((uint8_t *)img, {480, 640, 3});
             // std::list<dl::detect::result_t> &detect_results = self->detector.infer((uint16_t *)frame->buf, {(int)frame->height, (int)frame->width, 3});
+
+            free(img);
 
             if (detect_results.size())
             {
@@ -100,9 +137,6 @@ static void task(AppDetect *self)
             else {
                 ESP_LOGE(TAG, "No object detected");
             }
-
-            ESP_LOGI(TAG, "Freeing frame");
-            esp_camera_fb_return(frame);
 
             // if (self->queue_o) {
             //     // ESP_LOGI(TAG, "Passing frame to output queue");
