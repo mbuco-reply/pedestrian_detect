@@ -67,13 +67,10 @@ void print_detected_result(std::list<dl::detect::result_t> &detect_results)
 
 AppDetect::AppDetect(QueueHandle_t queue_i,
                  QueueHandle_t queue_o) : Frame(queue_i, queue_o)
-{
-}
+{}
 
 AppDetect::~AppDetect()
-{
-
-}
+{}
 
 static void task(AppDetect *self)
 {
@@ -84,10 +81,10 @@ static void task(AppDetect *self)
 
     while (true)
     {
-        // if (self->queue_i == nullptr)
-        //     break;
+        if (self->queue_i == nullptr)
+            break;
 
-        if (xQueueReceive(self->queue_i, &frame, 5000/portTICK_PERIOD_MS))
+        if (xQueueReceive(self->queue_i, &frame, portMAX_DELAY) == pdTRUE)
         {
             // ESP_LOGI(TAG, "Got a frame");
             auto &detect_results = self->detect->run((uint8_t *)frame->buf, {480, 640, 3});
@@ -104,10 +101,13 @@ static void task(AppDetect *self)
                 ESP_LOGE(TAG, "No object detected");
             }
 
-            if (self->queue_o) {
-                // ESP_LOGI(TAG, "Passing frame to output queue");
-                xQueueSend(self->queue_o, &frame, portMAX_DELAY);
-            }
+            ESP_LOGI(TAG, "Freeing frame");
+            esp_camera_fb_return(frame);
+
+            // if (self->queue_o) {
+            //     // ESP_LOGI(TAG, "Passing frame to output queue");
+            //     xQueueSend(self->queue_o, &frame, portMAX_DELAY);
+            // }
         }
         else {
             ESP_LOGE(TAG, "Failed to receive frame");
