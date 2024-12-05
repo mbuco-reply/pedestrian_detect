@@ -1,5 +1,5 @@
 #include "app_camera.hpp"
-
+#include "jpeg_decoder.h"
 #include "esp_log.h"
 #include "esp_system.h"
 
@@ -8,46 +8,40 @@ const static char TAG[] = "App/Camera";
 extern const uint8_t pedestrian_jpeg_start[] asm("_binary_pedestrian_jpeg_start");
 extern const uint8_t pedestrian_jpeg_end[] asm("_binary_pedestrian_jpeg_end");
 
-// static camera_fb_t img_frame = {
-//     .len = 640 * 480 * 3,
-//     .width = 640,
-//     .height = 480,
-//     .format = PIXFORMAT_JPEG
-// };
+static camera_fb_t img_frame_pic = {
+    .len = (size_t)(pedestrian_jpeg_end - pedestrian_jpeg_start), // Size of the JPEG data
+    .width = 640,
+    .height = 480,
+    .format = PIXFORMAT_JPEG
+};
 
-// static camera_fb_t img_frame_pic = {
-//     .len = (size_t)(pedestrian_jpeg_end - pedestrian_jpeg_start), // Size of the JPEG data
-//     .width = 640,
-//     .height = 480,
-//     .format = PIXFORMAT_JPEG
-// };
+uint8_t *decode_jpeg(const uint8_t *jpg_img, uint32_t jpg_img_size, int height, int width)
+{
+    uint32_t outbuf_size = height * width * 3;
+    uint8_t *outbuf = (uint8_t *)heap_caps_malloc(outbuf_size, MALLOC_CAP_SPIRAM);
+    // JPEG decode config
+    esp_jpeg_image_cfg_t jpeg_cfg = {.indata = (uint8_t *)jpg_img,
+                                     .indata_size = jpg_img_size,
+                                     .outbuf = outbuf,
+                                     .outbuf_size = outbuf_size,
+                                     .out_format = JPEG_IMAGE_FORMAT_RGB888,
+                                     .out_scale = JPEG_IMAGE_SCALE_0,
+                                     .flags = {
+                                         .swap_color_bytes = 1,
+                                     }};
 
-// camera_fb_t * get_img()
-// {
-//     img_frame_pic.buf = (uint8_t *)pedestrian_jpeg_start; // Point directly to JPEG data
-//     img_frame_pic.len = pedestrian_jpeg_end - pedestrian_jpeg_start;
-//     img_frame_pic.format = PIXFORMAT_JPEG; // Ensure format is JPEG
-//     return &img_frame_pic;
-// }
+    esp_jpeg_image_output_t outimg;
+    esp_jpeg_decode(&jpeg_cfg, &outimg);
+    assert(outimg.height == height && outimg.width == width);
+    return outbuf;
+}
 
-// static camera_fb_t img_frame = {
-//     .len = 640 * 480 * 3,
-//     .width = 640,
-//     .height = 480,
-//     .format = PIXFORMAT_RGB888
-// };
-
-// camera_fb_t * get_img()
-// {
-//     img_frame.buf = get_image(pedestrian_jpeg_start, pedestrian_jpeg_end - pedestrian_jpeg_start, 480, 640);
-//     return &img_frame;
-// }
-
-// camera_fb_t * get_img_cam(camera_fb_t * frame)
-// {
-//     img_frame.buf = get_image(frame->buf, 640*480*3, 480, 640);
-//     return &img_frame;
-// }
+// Get image from binary data
+camera_fb_t * get_img()
+{
+    img_frame_pic.buf = decode_jpeg(pedestrian_jpeg_start, pedestrian_jpeg_end - pedestrian_jpeg_start, 480, 640);
+    return &img_frame_pic;
+}
 
 AppCamera::AppCamera(const pixformat_t pixel_fromat,
                      const framesize_t frame_size,
@@ -132,18 +126,16 @@ static void task(AppCamera *self)
 
         camera_fb_t *frame = esp_camera_fb_get();
         // camera_fb_t *frame = get_img();
-        // camera_fb_t *frame = get_img_cam(frame_cam);
         
         if (frame) {
-            // ESP_LOGI(TAG, "Received frame from camera, passing it to output queue");
             xQueueSend(self->queue_o, &frame, portMAX_DELAY);
         }
 
-        if(frame) {
-            ESP_LOGI(TAG, "Frame received is of dimensions %dx%d", frame->width, frame->height);
-        }
+        // if(frame) {
+        //     ESP_LOGI(TAG, "Frame received is of dimensions %dx%d", frame->width, frame->height);
+        // }
 
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        // vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 
     ESP_LOGD(TAG, "Stop");

@@ -1,8 +1,7 @@
 // File: components/app_rgb888_to_bmp/include/rgb888_to_bmp.hpp
 #pragma once
 
-#include <cstdint>
-#include <cstddef>
+#include "../../common.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,7 +20,8 @@ extern "C" {
  *
  * @note The caller is responsible for freeing the bmp_buffer using free().
  */
-bool rgb888_to_bmp(const uint8_t* rgb_buffer, int width, int height, uint8_t** bmp_buffer, size_t* bmp_size);
+bool rgb888_to_bmp(uint8_t* rgb_buffer, int src_width, int src_height, int dst_width, int dst_height, uint8_t** bmp_buffer, size_t* bmp_size);
+void draw_detected_rectangles_on_bmp(uint8_t* bmp_buffer, size_t bmp_size, int dst_width, int dst_height, int src_width, int src_height, res_detect_t *detect_results);
 
 #ifdef __cplusplus
 }

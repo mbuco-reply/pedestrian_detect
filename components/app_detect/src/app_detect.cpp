@@ -1,60 +1,45 @@
 #include "app_detect.hpp"
-
-#include <list>
-#include "esp_log.h"
-#include "esp_camera.h"
-
-#include "dl_image.hpp"
-#include "fb_gfx.h"
-#include "who_ai_utils.hpp"
+#include "../../common.hpp"
 #include "jpeg_decoder.h"
+#include "esp_camera.h"
 
 static const char TAG[] = "App/Detect";
 
-#define RGB565_MASK_RED 0xF800
-#define RGB565_MASK_GREEN 0x07E0
-#define RGB565_MASK_BLUE 0x001F
+void draw_detection_result(uint8_t *image_ptr, int image_height, int image_width, std::list<dl::detect::result_t> &results)
+{
+    int i = 0;
+    for (std::list<dl::detect::result_t>::iterator prediction = results.begin(); prediction != results.end(); prediction++, i++)
+    {
+        dl::image::draw_hollow_rectangle(image_ptr, image_height, image_width,
+                                         DL_MAX(prediction->box[0], 0),
+                                         DL_MAX(prediction->box[1], 0),
+                                         DL_MAX(prediction->box[2], 0),
+                                         DL_MAX(prediction->box[3], 0),
+                                         0x00FF00);
+    }
+}
 
-// Structure to hold frame buffer information
-typedef struct {
-    uint8_t *buffer; // Pointer to the frame data (e.g., JPEG)
-    size_t len;      // Length of the frame data
-} frame_t;
+res_detect_t prepare_results_for_transfer(std::list<dl::detect::result_t> &results)
+{
+    res_detect_t res;
+    res.count = results.size();
+    int i = 0;
 
-// static void rgb_print(camera_fb_t *fb, uint32_t color, const char *str)
-// {
-//     fb_gfx_print(fb, (fb->width - (strlen(str) * 14)) / 2, 10, color, str);
-// }
+    for (std::list<dl::detect::result_t>::iterator prediction = results.begin(); prediction != results.end(); prediction++, i++)
+    {
+        res_rect_t rect = {
+            .corners = {
+                (uint16_t)prediction->box[0],
+                (uint16_t)prediction->box[1],
+                (uint16_t)prediction->box[2],
+                (uint16_t)prediction->box[3]
+            }
+        };
+        res.results[i] = rect;           
+    }
 
-// static int rgb_printf(camera_fb_t *fb, uint32_t color, const char *format, ...)
-// {
-//     char loc_buf[64];
-//     char *temp = loc_buf;
-//     int len;
-//     va_list arg;
-//     va_list copy;
-//     va_start(arg, format);
-//     va_copy(copy, arg);
-//     len = vsnprintf(loc_buf, sizeof(loc_buf), format, arg);
-//     va_end(copy);
-//     if (len >= sizeof(loc_buf))
-//     {
-//         temp = (char *)malloc(len + 1);
-//         if (temp == NULL)
-//         {
-//             return 0;
-//         }
-//     }
-//     vsnprintf(temp, len + 1, format, arg);
-//     va_end(arg);
-//     rgb_print(fb, color, temp);
-//     if (len > 64)
-//     {
-//         free(temp);
-//     }
-//     return len;
-// }
-
+    return res;
+}
 
 uint8_t *get_image(const uint8_t *jpg_img, uint32_t jpg_img_size, int height, int width)
 {
@@ -75,19 +60,6 @@ uint8_t *get_image(const uint8_t *jpg_img, uint32_t jpg_img_size, int height, in
     esp_jpeg_decode(&jpeg_cfg, &outimg);
     assert(outimg.height == height && outimg.width == width);
     return outbuf;
-}
-
-static camera_fb_t img_frame = {
-    .len = 640 * 480 * 3,
-    .width = 640,
-    .height = 480,
-    .format = PIXFORMAT_RGB888
-};
-
-camera_fb_t * get_img_cam(camera_fb_t * frame)
-{
-    img_frame.buf = get_image(frame->buf, 640*480*3, 480, 640);
-    return &img_frame;
 }
 
 void print_detected_result(std::list<dl::detect::result_t> &detect_results)
@@ -114,7 +86,6 @@ static void task(AppDetect *self)
 {
     ESP_LOGD(TAG, "Start Human Detection");
     camera_fb_t *frame = nullptr;
-    // PedestrianDetect *detect = new PedestrianDetect();
     self->detect = new PedestrianDetect();
 
     while (true)
@@ -124,29 +95,26 @@ static void task(AppDetect *self)
 
         if (xQueueReceive(self->queue_i, &frame, portMAX_DELAY) == pdTRUE)
         {
-            // ESP_LOGI(TAG, "Got a frame");
+            res_detect_t res;
             uint8_t *img = get_image(frame->buf, frame->len, frame->height, frame->width);
             esp_camera_fb_return(frame);
 
-            auto &detect_results = self->detect->run((uint8_t *)img, {480, 640, 3});
-            // std::list<dl::detect::result_t> &detect_results = self->detector.infer((uint16_t *)frame->buf, {(int)frame->height, (int)frame->width, 3});
-
-            // free(img);
+            auto &detect_results = self->detect->run((uint8_t *)img, {FRAME_HEIGHT, FRAME_WIDTH, 3});
 
             if (detect_results.size())
             {
                 ESP_LOGI(TAG,"Detected %d objects", detect_results.size());
-                print_detected_result(detect_results);
-                // draw_detection_result((uint16_t *)frame->buf, frame->height, frame->width, detect_results);
-                // rgb_printf(frame, RGB565_MASK_RED, "%d IDs left", self->recognizer->get_enrolled_id_num());
+                res = prepare_results_for_transfer(detect_results);
+
+                // print_detected_result(detect_results);
+                // draw_detection_result((uint8_t *)img, 480, 640, detect_results);
             }
             else {
                 ESP_LOGE(TAG, "No object detected");
             }
 
             if (self->queue_o) {
-                // ESP_LOGI(TAG, "Passing frame to output queue");
-                frame_t send_frame = { .buffer = (uint8_t *)img, .len = 480 * 640 * 3 };
+                res_frame_t send_frame = { .buffer = (uint8_t *)img, .len = FRAME_HEIGHT * FRAME_WIDTH * 3, .detect_results = res };
                 xQueueSend(self->queue_o, &send_frame, portMAX_DELAY);
             }
         }
@@ -157,7 +125,6 @@ static void task(AppDetect *self)
     }
     
     ESP_LOGD(TAG, "Stop");
-    // free(frame);
     vTaskDelete(NULL);
 }
 

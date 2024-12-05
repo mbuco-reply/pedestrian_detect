@@ -6,6 +6,7 @@ set(requires    console
                 espressif__esp32-camera
                 esp_timer
                 esp_partition
+                esp_jpeg
                 )
 
 set(embed_files     "pedestrian.jpeg")
