@@ -117,8 +117,6 @@ static void frame_task(void *arg)
 
 static esp_err_t stream_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "Client connected to /stream");
-
     // Set response headers for BMP image
     httpd_resp_set_type(req, "image/bmp");
     httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"image.bmp\"");

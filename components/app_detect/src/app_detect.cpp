@@ -88,6 +88,10 @@ static void task(AppDetect *self)
     camera_fb_t *frame = nullptr;
     self->detect = new PedestrianDetect();
 
+    // Variables for FPS counting
+    static int frame_count = 0;
+    static int64_t last_fps_time = esp_timer_get_time(); // in microseconds
+
     while (true)
     {
         if (self->queue_i == nullptr)
@@ -95,6 +99,9 @@ static void task(AppDetect *self)
 
         if (xQueueReceive(self->queue_i, &frame, portMAX_DELAY) == pdTRUE)
         {
+            // Increment frame_count for FPS calculation
+            frame_count++;
+
             res_detect_t res;
             uint8_t *img = get_image(frame->buf, frame->len, frame->height, frame->width);
             esp_camera_fb_return(frame);
@@ -103,10 +110,10 @@ static void task(AppDetect *self)
 
             if (detect_results.size())
             {
-                ESP_LOGI(TAG,"Detected %d objects", detect_results.size());
+                ESP_LOGI(TAG,"Detected %d objects", (int)detect_results.size());
                 res = prepare_results_for_transfer(detect_results);
-
-                // print_detected_result(detect_results);
+                
+                print_detected_result(detect_results);
                 // draw_detection_result((uint8_t *)img, 480, 640, detect_results);
             }
             else {
@@ -114,19 +121,35 @@ static void task(AppDetect *self)
             }
 
             if (self->queue_o) {
-                res_frame_t send_frame = { .buffer = (uint8_t *)img, .len = FRAME_HEIGHT * FRAME_WIDTH * 3, .detect_results = res };
+                res_frame_t send_frame = {
+                    .buffer = (uint8_t *)img,
+                    .len = FRAME_HEIGHT * FRAME_WIDTH * 3,
+                    .detect_results = res
+                };
                 xQueueSend(self->queue_o, &send_frame, portMAX_DELAY);
+            }
+
+            // FPS calculation: Check if one second has passed
+            int64_t current_time = esp_timer_get_time(); // in microseconds
+            if ((current_time - last_fps_time) >= 1000000) {
+                // One second or more has elapsed
+                float fps = (float)frame_count * 1000000.0f / (float)(current_time - last_fps_time);
+                ESP_LOGI(TAG, "Current FPS: %.2f", fps);
+
+                // Reset for next measurement
+                frame_count = 0;
+                last_fps_time = current_time;
             }
         }
         else {
             ESP_LOGE(TAG, "Failed to receive frame");
         }
-        
     }
-    
+
     ESP_LOGD(TAG, "Stop");
     vTaskDelete(NULL);
 }
+
 
 void AppDetect::run()
 {
