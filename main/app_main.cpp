@@ -12,6 +12,12 @@
 
 static const char *TAG = "MAIN";
 
+// Structure to hold frame buffer information
+typedef struct {
+    uint8_t *buffer; // Pointer to the frame data (e.g., JPEG)
+    size_t len;      // Length of the frame data
+} frame_t;
+
 // Structure to pass camera frames
 typedef struct {
     camera_fb_t *frame;
@@ -68,7 +74,7 @@ extern "C" void app_main(void)
     // Create Queues
     QueueHandle_t camera_to_detect_queue = xQueueCreate(5, sizeof(camera_frame_t));
     QueueHandle_t camera_to_lcd_queue = xQueueCreate(5, sizeof(camera_frame_t));
-    QueueHandle_t camera_to_stream_queue = xQueueCreate(5, sizeof(camera_frame_t));
+    QueueHandle_t camera_to_stream_queue = xQueueCreate(5, sizeof(frame_t));
 
     if (camera_to_detect_queue == NULL || camera_to_lcd_queue == NULL || camera_to_stream_queue == NULL) {
         ESP_LOGE(TAG, "Failed to create queues");

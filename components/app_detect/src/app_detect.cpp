@@ -15,6 +15,12 @@ static const char TAG[] = "App/Detect";
 #define RGB565_MASK_GREEN 0x07E0
 #define RGB565_MASK_BLUE 0x001F
 
+// Structure to hold frame buffer information
+typedef struct {
+    uint8_t *buffer; // Pointer to the frame data (e.g., JPEG)
+    size_t len;      // Length of the frame data
+} frame_t;
+
 // static void rgb_print(camera_fb_t *fb, uint32_t color, const char *str)
 // {
 //     fb_gfx_print(fb, (fb->width - (strlen(str) * 14)) / 2, 10, color, str);
@@ -125,7 +131,7 @@ static void task(AppDetect *self)
             auto &detect_results = self->detect->run((uint8_t *)img, {480, 640, 3});
             // std::list<dl::detect::result_t> &detect_results = self->detector.infer((uint16_t *)frame->buf, {(int)frame->height, (int)frame->width, 3});
 
-            free(img);
+            // free(img);
 
             if (detect_results.size())
             {
@@ -138,10 +144,11 @@ static void task(AppDetect *self)
                 ESP_LOGE(TAG, "No object detected");
             }
 
-            // if (self->queue_o) {
-            //     // ESP_LOGI(TAG, "Passing frame to output queue");
-            //     xQueueSend(self->queue_o, &frame, portMAX_DELAY);
-            // }
+            if (self->queue_o) {
+                // ESP_LOGI(TAG, "Passing frame to output queue");
+                frame_t send_frame = { .buffer = (uint8_t *)img, .len = 480 * 640 * 3 };
+                xQueueSend(self->queue_o, &send_frame, portMAX_DELAY);
+            }
         }
         else {
             ESP_LOGE(TAG, "Failed to receive frame");
@@ -150,7 +157,7 @@ static void task(AppDetect *self)
     }
     
     ESP_LOGD(TAG, "Stop");
-    free(frame);
+    // free(frame);
     vTaskDelete(NULL);
 }
 

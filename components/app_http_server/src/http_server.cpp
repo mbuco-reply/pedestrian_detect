@@ -1,178 +1,296 @@
 // File: components/app_http_server/http_server.cpp
-
 #include "http_server.hpp"
-#include "esp_log.h"
-#include "esp_camera.h" // For camera_fb_t
+#include "rgb888_to_bmp.hpp" // Include the BMP conversion header
 #include <string.h>
-#include <stdio.h>      // For snprintf
-#include <stdlib.h>     // For malloc and free
+#include <stdio.h>
+#include <stdlib.h>
 
-// Define a tag for logging
-static const char* TAG = "app_http_server";
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 
-// Variable to hold the stream queue handle
-static QueueHandle_t s_stream_queue = NULL;
+#include "esp_http_server.h"
+#include "esp_log.h"
 
-// Forward declarations
-static esp_err_t index_handler(httpd_req_t *req);
+// ---------------------- Configuration ----------------------
+
+#define HTTP_PORT 80
+
+#define FRAME_QUEUE_SIZE 10
+
+#define FRAME_WIDTH  640
+#define FRAME_HEIGHT 480
+#define FRAME_SIZE   (FRAME_WIDTH * FRAME_HEIGHT * 3) // RGB888: 3 bytes per pixel
+
+// ---------------------- Global Definitions ----------------------
+
+static const char *TAG = "HTTP_SERVER";
+
+// Structure to hold frame buffer information
+typedef struct {
+    uint8_t *buffer; // Pointer to the frame data (BMP data after modification)
+    size_t len;      // Length of the frame data
+} frame_t;
+
+// Global variables for frame management
+static frame_t current_frame;
+static SemaphoreHandle_t frame_mutex;
+static QueueHandle_t frame_queue;
+
+// ---------------------- Function Prototypes ----------------------
+
 static esp_err_t stream_handler(httpd_req_t *req);
+static esp_err_t root_handler(httpd_req_t *req);
+static httpd_handle_t start_webserver(void);
+static void frame_task(void *arg);
+esp_err_t publish_frame(uint8_t *buffer, size_t len);
 
-// Function to initialize and start the HTTP server
-extern "C" esp_err_t start_http_server(QueueHandle_t stream_queue)
+// ---------------------- Function Implementations ----------------------
+
+/**
+ * @brief Publish a new frame to the frame queue.
+ *
+ * This function should be called by other parts of your application
+ * whenever a new frame is available for streaming.
+ *
+ * @param buffer Pointer to the frame data (must be dynamically allocated)
+ * @param len    Length of the frame data
+ * @return esp_err_t ESP_OK on success, ESP_FAIL on failure
+ *
+ * @note After calling this function, do not modify or free the buffer.
+ *       The frame_task will handle freeing the buffer.
+ */
+esp_err_t publish_frame(uint8_t *buffer, size_t len)
 {
-    s_stream_queue = stream_queue;
-
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-
-    // Start the HTTP server
-    httpd_handle_t server = NULL;
-    esp_err_t ret = httpd_start(&server, &config);
-
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start HTTP server");
-        return ret;
+    if (len != FRAME_SIZE) {
+        ESP_LOGE(TAG, "Invalid frame size: expected %d, got %zu", FRAME_SIZE, len);
+        return ESP_FAIL;
     }
 
-    // Register URI handler for the root path (serving the HTML page)
-    httpd_uri_t index_uri = {
-        .uri       = "/",
-        .method    = HTTP_GET,
-        .handler   = index_handler,
-        .user_ctx  = NULL
-    };
+    frame_t new_frame;
+    new_frame.buffer = buffer;
+    new_frame.len = len;
 
-    ret = httpd_register_uri_handler(server, &index_uri);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register index URI handler");
-        return ret;
+    if (xQueueSend(frame_queue, &new_frame, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to send frame to queue");
+        free(buffer); // Free the buffer if it can't be sent
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+/**
+ * @brief FreeRTOS task to process incoming frames from the queue.
+ *
+ * This task continuously waits for new frames, converts them to BMP,
+ * and updates the current frame buffer for streaming.
+ *
+ * @param arg Not used
+ */
+static void frame_task(void *arg)
+{
+    frame_t incoming_frame;
+    while (1) {
+        // Wait indefinitely for a new frame
+        if (xQueueReceive(frame_queue, &incoming_frame, portMAX_DELAY) == pdTRUE) {
+            // Convert RGB888 to BMP
+            uint8_t* bmp_buffer = NULL;
+            size_t bmp_size = 0;
+            bool success = rgb888_to_bmp(incoming_frame.buffer, FRAME_WIDTH, FRAME_HEIGHT, &bmp_buffer, &bmp_size);
+            // Free the incoming RGB888 buffer
+            free(incoming_frame.buffer);
+
+            if (!success) {
+                ESP_LOGE(TAG, "Failed to convert RGB888 to BMP");
+                continue; // Skip this frame
+            }
+
+            // Update the current frame under mutex protection
+            if (xSemaphoreTake(frame_mutex, portMAX_DELAY) == pdTRUE) {
+                // Free previous frame buffer if it exists
+                if (current_frame.buffer) {
+                    free(current_frame.buffer);
+                }
+                current_frame.buffer = bmp_buffer;
+                current_frame.len = bmp_size;
+                xSemaphoreGive(frame_mutex);
+            } else {
+                // Could not take mutex, free the bmp_buffer
+                ESP_LOGE(TAG, "Failed to take frame mutex");
+                free(bmp_buffer);
+            }
+        }
+    }
+}
+
+/**
+ * @brief HTTP handler for the /stream endpoint.
+ *
+ * Serves the BMP image converted from the RGB888 frame.
+ *
+ * @param req Pointer to the HTTP request
+ * @return esp_err_t ESP_OK on success
+ */
+static esp_err_t stream_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Client connected to /stream");
+
+    // Set response headers for BMP image
+    httpd_resp_set_type(req, "image/bmp");
+    httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"image.bmp\"");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+
+    uint8_t* bmp_buffer = NULL;
+    size_t bmp_len = 0;
+
+    // Acquire the mutex to safely access the current frame
+    if (xSemaphoreTake(frame_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+        if (current_frame.buffer && current_frame.len > 0) {
+            // Copy the current frame buffer
+            bmp_buffer = (uint8_t*)malloc(current_frame.len);
+            if (bmp_buffer) {
+                memcpy(bmp_buffer, current_frame.buffer, current_frame.len);
+                bmp_len = current_frame.len;
+            } else {
+                ESP_LOGE(TAG, "Failed to allocate memory for BMP copy");
+            }
+        } else {
+            ESP_LOGE(TAG, "No frame available");
+        }
+        xSemaphoreGive(frame_mutex);
+    } else {
+        ESP_LOGE(TAG, "Failed to take frame mutex");
     }
 
-    // Register URI handler for the image data
-    httpd_uri_t stream_uri = {
-        .uri       = "/image_data",
-        .method    = HTTP_GET,
-        .handler   = stream_handler,
-        .user_ctx  = NULL
-    };
-
-    ret = httpd_register_uri_handler(server, &stream_uri);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register image URI handler");
-        return ret;
+    if (bmp_buffer && bmp_len > 0) {
+        // Send the BMP data
+        esp_err_t res = httpd_resp_send(req, (const char*)bmp_buffer, bmp_len);
+        free(bmp_buffer); // Free the copied BMP buffer
+        if (res != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to send BMP data");
+            return res;
+        }
+    } else {
+        // No frame available or failed to copy
+        ESP_LOGE(TAG, "No BMP frame data available");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No BMP frame data available");
+        return ESP_FAIL;
     }
 
     return ESP_OK;
 }
 
-// HTML page handler
-static esp_err_t index_handler(httpd_req_t *req)
+/**
+ * @brief HTTP handler for the root '/' endpoint.
+ *
+ * Serves an HTML page that displays the BMP image.
+ *
+ * @param req Pointer to the HTTP request
+ * @return esp_err_t ESP_OK on success
+ */
+static esp_err_t root_handler(httpd_req_t *req)
 {
+    ESP_LOGI(TAG, "Client connected to /");
+
     const char* resp_str =
         "<!DOCTYPE html>"
         "<html>"
         "<head>"
-        "<meta charset=\"UTF-8\">"
-        "<title>ESP32 Image</title>"
+        "<title>ESP32 BMP Image</title>"
         "</head>"
         "<body>"
-        "<h1>ESP32 Image Rendering</h1>"
-        "<canvas id=\"canvas\"></canvas>"
-        "<script>"
-        "fetch('/image_data')"
-        ".then(response => response.json())"
-        ".then(data => {"
-            "const width = data.width;"
-            "const height = data.height;"
-            "const hexString = data.data;"
-            "const canvas = document.getElementById('canvas');"
-            "canvas.width = width;"
-            "canvas.height = height;"
-            "const ctx = canvas.getContext('2d');"
-            "const imageData = ctx.createImageData(width, height);"
-            "const pixelData = imageData.data;"
-            "let j = 0;"
-            "for (let i = 0; i < hexString.length; i += 6) {"
-                "const r = parseInt(hexString.substr(i, 2), 16);"
-                "const g = parseInt(hexString.substr(i + 2, 2), 16);"
-                "const b = parseInt(hexString.substr(i + 4, 2), 16);"
-                "pixelData[j++] = r;"
-                "pixelData[j++] = g;"
-                "pixelData[j++] = b;"
-                "pixelData[j++] = 255;" // Alpha channel
-            "}"
-            "ctx.putImageData(imageData, 0, 0);"
-        "})"
-        ".catch(err => console.error(err));"
-        "</script>"
+        "<h1>ESP32 BMP Image</h1>"
+        "<img src=\"/stream\" alt=\"BMP Image\" />"
         "</body>"
         "</html>";
 
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, resp_str, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+
     return ESP_OK;
 }
 
-// Image data handler
-static esp_err_t stream_handler(httpd_req_t *req)
+/**
+ * @brief URI handler structure for /stream endpoint.
+ */
+static const httpd_uri_t stream_uri = {
+    .uri       = "/stream",
+    .method    = HTTP_GET,
+    .handler   = stream_handler,
+    .user_ctx  = NULL
+};
+
+/**
+ * @brief URI handler structure for root '/' endpoint.
+ */
+static const httpd_uri_t root_uri = {
+    .uri       = "/",
+    .method    = HTTP_GET,
+    .handler   = root_handler,
+    .user_ctx  = NULL
+};
+
+/**
+ * @brief Start the HTTP server and register URI handlers.
+ *
+ * @return httpd_handle_t Handle to the started HTTP server, or NULL on failure
+ */
+static httpd_handle_t start_webserver(void)
 {
-    camera_fb_t *frame = NULL;
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = HTTP_PORT;
 
-    // Wait indefinitely for a frame from the queue
-    if (xQueueReceive(s_stream_queue, &frame, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(TAG, "Failed to receive frame from queue");
-        httpd_resp_send_500(req);
+    httpd_handle_t server = NULL;
+    ESP_LOGI(TAG, "Starting HTTP server on port %d", config.server_port);
+    if (httpd_start(&server, &config) == ESP_OK) {
+        // Register the root URI handler
+        httpd_register_uri_handler(server, &root_uri);
+        ESP_LOGI(TAG, "/ endpoint registered");
+
+        // Register the /stream URI handler
+        httpd_register_uri_handler(server, &stream_uri);
+        ESP_LOGI(TAG, "/stream endpoint registered");
+        return server;
+    }
+
+    ESP_LOGE(TAG, "Failed to start HTTP server");
+    return NULL;
+}
+
+/**
+ * @brief Application entry point.
+ *
+ * Initializes synchronization primitives, starts the HTTP server,
+ * and creates the frame processing task.
+ */
+esp_err_t start_http_server(QueueHandle_t stream_queue)
+{
+    // Initialize mutex for frame access
+    frame_mutex = xSemaphoreCreateMutex();
+    if (frame_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create frame mutex");
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Received frame from queue");
+    // Initialize current frame to NULL
+    current_frame.buffer = NULL;
+    current_frame.len = 0;
 
-    // Set the content type to indicate JSON data
-    httpd_resp_set_type(req, "application/json");
+    // Use the provided stream queue
+    frame_queue = stream_queue;
 
-    // Prepare JSON response
-    const size_t max_chunk_size = 1024; // Adjust as needed
-    char *json_chunk = (char *)malloc(max_chunk_size);
-    if (!json_chunk) {
-        ESP_LOGE(TAG, "Failed to allocate memory for JSON chunk");
-        httpd_resp_send_500(req);
-        esp_camera_fb_return(frame);
+    // Start the HTTP server
+    httpd_handle_t server = start_webserver();
+    if (server == NULL) {
+        ESP_LOGE(TAG, "HTTP server failed to start");
         return ESP_FAIL;
     }
 
-    // Start JSON object
-    const char *json_start = "{ \"width\": %d, \"height\": %d, \"data\": \"";
-    int len = snprintf(json_chunk, max_chunk_size, json_start, frame->width, frame->height);
-    httpd_resp_send_chunk(req, json_chunk, len);
-
-    // Convert binary data to hex and send in chunks
-    size_t bytes_processed = 0;
-    while (bytes_processed < frame->len) {
-        size_t bytes_to_process = frame->len - bytes_processed;
-        if (bytes_to_process > (max_chunk_size - 2) / 2) { // Each byte becomes two hex chars
-            bytes_to_process = (max_chunk_size - 2) / 2;
-        }
-
-        size_t json_index = 0;
-        for (size_t i = 0; i < bytes_to_process; i++) {
-            snprintf(&json_chunk[json_index], 3, "%02X", frame->buf[bytes_processed + i]);
-            json_index += 2;
-        }
-
-        bytes_processed += bytes_to_process;
-
-        // Send the chunk
-        httpd_resp_send_chunk(req, json_chunk, json_index);
-    }
-
-    // End JSON object
-    const char *json_end = "\" }";
-    httpd_resp_send_chunk(req, json_end, strlen(json_end));
-
-    // Signal the end of the response
-    httpd_resp_send_chunk(req, NULL, 0);
-
-    free(json_chunk);
-    esp_camera_fb_return(frame);
+    // Start the frame processing task
+    xTaskCreate(frame_task, "frame_task", 8192, NULL, 5, NULL);
 
     return ESP_OK;
 }
