@@ -24,28 +24,38 @@ This project enables real-time pedestrian detection on ESP32 devices, capturing 
 
 1. Clone the ESP-IDF repository:
 ```
-   git clone https://github.com/espressif/esp-idf.git
+git clone https://github.com/espressif/esp-idf.git
 ```
+
 2. Clone this project repository:
 ```
-   git clone git@github.com:mbuco-reply/pedestrian_detect.git
+git clone git@github.com:mbuco-reply/pedestrian_detect.git
 ```
+
 3. Install ESP-IDF dependencies:
 ```
-   ./esp-idf/install.sh
+./esp-idf/install.sh
 ```
+
 4. Export the ESP-IDF environment:
-   source ./esp-idf/export.sh
+```
+source ./esp-idf/export.sh
+```
 
 5. Navigate to the project directory:
-   cd pedestrian_detect
+```
+cd pedestrian_detect
+```
 
 6. Set the target (if necessary):
-   export IDF_TARGET=esp32s3
+```
+export IDF_TARGET=esp32s3
+```
 
 7. Build, flash, and monitor the project:
-   idf.py build flash monitor
-
+```
+idf.py build flash monitor
+```
 ---
 
 ## Running the Project
