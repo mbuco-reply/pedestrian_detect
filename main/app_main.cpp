@@ -23,6 +23,11 @@
 
 static const char *TAG = "MAIN";
 
+/////////// ENTER YOUR WIFI CREDETIALS HERE ///////////
+#define WIFI_SSID "TP-Link_3E20"
+#define WIFI_PASS "password"
+///////////////////////////////////////////////////////
+
 // Declare external functions if needed
 extern "C" void app_main(void)
 {
@@ -72,8 +77,8 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "==============================");
 
     // Initialize Wi-Fi
-    std::string wifi_ssid = "TP-Link_3E20";
-    std::string wifi_password = "password";
+    std::string wifi_ssid = WIFI_SSID;
+    std::string wifi_password = WIFI_PASS;
     AppWiFi wifi(wifi_ssid, wifi_password);
     wifi.run();
 
