@@ -209,7 +209,7 @@ static esp_err_t root_handler(httpd_req_t *req)
         "                document.getElementById(\"countDisplay\").innerText = \"Detect count: \" + text;\n"
         "            });\n"
         "        }\n"
-        "        setInterval(updateImage, 1000);\n"
+        "        setInterval(updateImage, 600);\n"
         "    </script>\n"
         "</body>\n"
         "</html>";

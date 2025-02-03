@@ -1,0 +1,24 @@
+@startuml
+actor User
+rectangle "AppMain" as Main {
+    [Initialize NVS]
+    [Initialize WiFi]
+    [Initialize Camera]
+    [Initialize Detect]
+    [Initialize HTTP Server]
+}
+
+rectangle "AppCamera" as Camera
+rectangle "AppDetect" as Detect
+rectangle "HTTPServer" as Server
+
+User --> Main : Start application
+Main --> Camera : Starts Camera Task
+Main --> Detect : Starts Detect Task
+Main --> Server : Starts HTTP Server
+
+Camera --> Detect : Captures and sends frame
+Detect --> Server : Processes and sends frame
+Server --> User : Streams frame over HTTP
+
+@enduml

@@ -72,8 +72,8 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "==============================");
 
     // Initialize Wi-Fi
-    std::string wifi_ssid = "BucoNexusHQ";
-    std::string wifi_password = "79452952864284852700";
+    std::string wifi_ssid = "TP-Link_3E20";
+    std::string wifi_password = "password";
     AppWiFi wifi(wifi_ssid, wifi_password);
     wifi.run();
 
