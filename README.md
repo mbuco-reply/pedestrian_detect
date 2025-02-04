@@ -103,7 +103,6 @@ pedestrian_detect
 | **Flash Size**       | 8 MB                                                                                            |
 | **PSRAM**            | 8 MB, 80 MHz Speed                                                                              |
 | **Camera Detected**  | OV2640, Address: 0x30, Camera PID: 0x26                                                         |
-| **Wi-Fi Connection** | Connected to SSID: BucoNexusHQ, RSSI: -47 dBm                                                   |
 | **HTTP Server**      | Running on port 80, Endpoints: `/`, `/stream`, `/count`                                         |
 
 ---
